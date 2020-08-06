@@ -1,0 +1,27 @@
+version: '2.4'
+
+services:
+  database:
+    image: timescale/timescaledb:latest-pg12
+    shm_size: 256mb
+    volumes:
+      - "database:/var/lib/postgresql/data"
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_PASSWORD: "longpassword"
+  postgrest:
+    image: postgrest/postgrest
+    ports:
+      - "127.0.0.1:5000:3000"
+    environment:
+      PGRST_DB_URI: "postgres://postgres:longpassword@database/mctrack"
+      PGRST_DB_ANON_ROLE: "postgres"
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "127.0.0.1:5001:3000"
+    environment: {}
+
+volumes:
+  database:
