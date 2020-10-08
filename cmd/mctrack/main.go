@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -125,7 +126,11 @@ func retryPingCtx(ctx context.Context, address string) (*mcping.PingResponse, er
 }
 
 func main() {
-	connString := "postgres://postgres:longpassword@localhost:5433/mctrack"
+	connString := os.Getenv("MCTRACK_DATABASE_URL")
+	if connString == "" {
+		panic("MCTRACK_DATABASE_URL is not set")
+	}
+
 	poolConfig, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		panic(err)
@@ -136,6 +141,10 @@ func main() {
 		panic(err)
 	}
 
+	mainLoop(pool)
+}
+
+func mainLoop(pool *pgxpool.Pool) {
 	// Query configured servers
 	var servers []ServerInfo
 	rows, err := pool.Query(context.Background(), "select name, ip from mctrack_watched_servers;")
