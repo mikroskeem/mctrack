@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net"
+	"os"
 	"strconv"
 	"sync"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v4"
@@ -112,7 +112,7 @@ func retryPingCtx(ctx context.Context, address string) (*mcping.PingResponse, er
 				return nil, err
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
-				fmt.Printf("%s ping attempt %d\n", address, n)
+				log.Printf("%s ping attempt %d", address, n)
 				time.Sleep(1500 * time.Millisecond)
 				n += 1
 				continue
@@ -141,7 +141,12 @@ func main() {
 		panic(err)
 	}
 
-	mainLoop(pool)
+	for {
+		log.Println("querying the servers")
+		mainLoop(pool)
+		log.Println("sleeping")
+		<-time.After(10 * time.Second)
+	}
 }
 
 func mainLoop(pool *pgxpool.Pool) {
@@ -176,7 +181,7 @@ func mainLoop(pool *pgxpool.Pool) {
 		defer cancel()
 		resolved, err := resolveAddress(info.IP, resolveCtx)
 		if err == context.DeadlineExceeded {
-			fmt.Printf("failed to resolve IP for %s: %s", info.Name, err)
+			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
 			continue
 		} else if err != nil {
 			panic(err)
@@ -194,15 +199,15 @@ func mainLoop(pool *pgxpool.Pool) {
 
 			resp, err := retryPingCtx(ctx, address)
 			if err == context.DeadlineExceeded {
-				fmt.Printf("%s did not respond\n", info.Name)
+				log.Printf("%s did not respond", info.Name)
 			} else if nerr, ok := err.(net.Error); ok {
-				fmt.Printf("%s did not respond: %s\n", info.Name, nerr)
+				log.Printf("%s did not respond: %s", info.Name, nerr)
 			} else if err != nil {
 				// TODO: better handling perhaps
-				fmt.Printf("%s did not respond: %s\n", info.Name, nerr)
+				log.Printf("%s did not respond: %s", info.Name, nerr)
 			} else if err == nil {
 				onlinePlayers = resp.Online
-				fmt.Printf("%s has %d players online\n", info.Name, onlinePlayers)
+				log.Printf("%s has %d players online", info.Name, onlinePlayers)
 			}
 
 			ts = time.Now()
@@ -224,7 +229,7 @@ func mainLoop(pool *pgxpool.Pool) {
 		})
 	}
 
-	fmt.Printf("inserting %d entries\n", len(responses))
+	log.Printf("inserting %d entries\n", len(responses))
 	inserted, err := pool.CopyFrom(
 		context.Background(),
 		pgx.Identifier{"mctrack_servers"},
@@ -235,5 +240,5 @@ func mainLoop(pool *pgxpool.Pool) {
 		panic(err)
 	}
 
-	fmt.Printf("inserted %d entries\n", inserted)
+	log.Printf("inserted %d entries\n", inserted)
 }
