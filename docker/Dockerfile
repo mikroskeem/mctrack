@@ -1,6 +1,6 @@
 FROM golang:alpine
 
-WORKDIR $GOPATH/src/github.com/mikroskeem/depot
+WORKDIR $GOPATH/src/github.com/mikroskeem/mctrack
 COPY . ./
 RUN env CGO_ENABLED=0 GOOS=linux go build -a -installsuffix nocgo \
         -ldflags "-s -w" \
