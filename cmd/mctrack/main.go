@@ -113,7 +113,7 @@ func retryPingCtx(ctx context.Context, address string) (*mcping.PingResponse, er
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
 				log.Printf("%s ping attempt %d", address, n)
-				time.Sleep(1500 * time.Millisecond)
+				<-time.After(1500 * time.Millisecond)
 				n += 1
 				continue
 			}
@@ -199,11 +199,9 @@ func mainLoop(pool *pgxpool.Pool) {
 			var onlinePlayers int = 0
 
 			resp, err := retryPingCtx(ctx, address)
-			if err == context.DeadlineExceeded {
-				log.Printf("%s did not respond", info.Name)
-			} else if nerr, ok := err.(net.Error); ok {
+			if nerr, ok := err.(net.Error); ok {
 				log.Printf("%s did not respond: %s", info.Name, nerr)
-			} else if err != nil {
+			} else if err != nil && err != context.DeadlineExceeded {
 				// TODO: better handling perhaps
 				log.Printf("%s did not respond: %s", info.Name, nerr)
 			} else if err == nil {
@@ -229,7 +227,7 @@ func mainLoop(pool *pgxpool.Pool) {
 		})
 	}
 
-	inserted, err := pool.CopyFrom(
+	_, err = pool.CopyFrom(
 		context.Background(),
 		pgx.Identifier{"mctrack_servers"},
 		[]string{"name", "ip", "resolved_ip", "timestamp", "online"},
@@ -238,6 +236,4 @@ func mainLoop(pool *pgxpool.Pool) {
 	if err != nil {
 		panic(err)
 	}
-
-	log.Printf("inserted %d entries\n", inserted)
 }
