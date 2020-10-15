@@ -142,9 +142,7 @@ func main() {
 	}
 
 	for {
-		log.Println("querying the servers")
 		mainLoop(pool)
-		log.Println("sleeping")
 		<-time.After(10 * time.Second)
 	}
 }
@@ -210,7 +208,6 @@ func mainLoop(pool *pgxpool.Pool) {
 				log.Printf("%s did not respond: %s", info.Name, nerr)
 			} else if err == nil {
 				onlinePlayers = resp.Online
-				log.Printf("%s has %d players online", info.Name, onlinePlayers)
 			}
 
 			ts = time.Now()
@@ -232,7 +229,6 @@ func mainLoop(pool *pgxpool.Pool) {
 		})
 	}
 
-	log.Printf("inserting %d entries\n", len(responses))
 	inserted, err := pool.CopyFrom(
 		context.Background(),
 		pgx.Identifier{"mctrack_servers"},
