@@ -183,6 +183,9 @@ func mainLoop(pool *pgxpool.Pool) {
 		if err == context.DeadlineExceeded {
 			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
 			continue
+		} else if _, ok := err.(net.Error); ok {
+			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
+			continue
 		} else if err != nil {
 			panic(err)
 		}
