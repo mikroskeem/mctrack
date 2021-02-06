@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS mctrack_servers (
 	ip VARCHAR(261) NOT NULL, -- Domain max 255 + : + 5
 	resolved_ip VARCHAR(51) NOT NULL, -- IPv6 max 45 + : + 5
 	timestamp TIMESTAMPTZ NOT NULL,
-	online INTEGER NOT NULL
+	online INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS mctrack_watched_servers (

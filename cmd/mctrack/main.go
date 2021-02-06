@@ -196,7 +196,7 @@ func mainLoop(pool *pgxpool.Pool) {
 			defer wg.Done()
 
 			var ts time.Time
-			var onlinePlayers int = 0
+			var onlinePlayers int = -1
 
 			resp, err := retryPingCtx(ctx, address)
 			if nerr, ok := err.(net.Error); ok {
@@ -222,8 +222,12 @@ func mainLoop(pool *pgxpool.Pool) {
 
 	var responses [][]interface{}
 	for resp := range respCh {
+		var onlineValue *int = nil
+		if resp.Online > -1 {
+			onlineValue = &resp.Online
+		}
 		responses = append(responses, []interface{}{
-			resp.Name, resp.IP, resp.ResolvedIP, resp.Timestamp, resp.Online,
+			resp.Name, resp.IP, resp.ResolvedIP, resp.Timestamp, onlineValue,
 		})
 	}
 
