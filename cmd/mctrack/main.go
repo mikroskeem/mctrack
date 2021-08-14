@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -75,25 +77,31 @@ func resolveAddress(addr string, ctx context.Context) (resolved string, normaliz
 			}
 		} else {
 			// TODO: handle earlier!
+			log.Printf("no meaningful dns records for %s found", resolvedHost)
 		}
 	} else if rerr, ok := err.(*net.DNSError); ok && !rerr.IsNotFound {
-		return "", "", err
+		return "", "", rerr
+	} else if rerr.IsNotFound {
+		return "", "", rerr
 	}
 
 	resolved = net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
 	return resolved, normalized, nil
 }
 
-func retryPingCtx(ctx context.Context, address string, realAddress string) (resp mcping.PingResponse, err error) {
+func retryPingCtx(ctx context.Context, name string, address string, realAddress string) (resp mcping.PingResponse, err error) {
 	n := 1
 	for {
+		if err = ctx.Err(); err != nil {
+			return
+		}
 		resp, err = mcping.DoPing(ctx, address, mcping.WithServerAddress(realAddress))
 		if err != nil {
-			if err == context.DeadlineExceeded {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
-				log.Printf("%s ping attempt %d", address, n)
+				log.Printf("server '%s' (%s) ping attempt %d", name, address, n)
 				<-time.After(1500 * time.Millisecond)
 				n += 1
 				continue
@@ -123,7 +131,9 @@ func main() {
 	}
 
 	for {
+		log.Println("pinging")
 		mainLoop(pool)
+		log.Println("sleeping")
 		<-time.After(10 * time.Second)
 	}
 }
@@ -153,20 +163,22 @@ func mainLoop(pool *pgxpool.Pool) {
 	rows.Close()
 
 	var wg sync.WaitGroup
-	respCh := make(chan ServerPingResponse, len(servers))
+	respCh := make(chan *ServerPingResponse, len(servers))
 
+	log.Printf("pinging %d servers", len(servers))
 	for _, info := range servers {
 		resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		resolved, normalized, err := resolveAddress(info.IP, resolveCtx)
-		if err == context.DeadlineExceeded {
-			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			log.Printf("IP resolving for '%s' timed out: %s", info.Name, err)
 			continue
-		} else if _, ok := err.(net.Error); ok {
-			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
+		} else if derr, ok := err.(*net.DNSError); ok {
+			log.Printf("dns resolution failed for '%s' (skipping): %s", info.Name, derr)
 			continue
 		} else if err != nil {
-			panic(err)
+			log.Printf("unknown error while resolving IP for '%s': %s", info.Name, err)
+			continue
 		}
 
 		wg.Add(1)
@@ -179,18 +191,19 @@ func mainLoop(pool *pgxpool.Pool) {
 			var ts time.Time
 			var onlinePlayers int = -1
 
-			resp, err := retryPingCtx(ctx, resolvedAddress, realAddress)
+			resp, err := retryPingCtx(ctx, info.Name, resolvedAddress, realAddress)
 			if nerr, ok := err.(net.Error); ok {
-				log.Printf("%s did not respond: %s", info.Name, nerr)
-			} else if err != nil && err != context.DeadlineExceeded {
-				// TODO: better handling perhaps
-				log.Printf("%s did not respond: %s", info.Name, nerr)
-			} else if err == nil {
+				log.Printf("server '%s' did not respond (net): %s", info.Name, nerr)
+			} else if errors.Is(err, io.EOF) {
+				log.Printf("server '%s' did not respond (io): %s", info.Name, err)
+			} else if err != nil {
+				log.Printf("server '%s' did not respond (unk): %s", info.Name, err)
+			} else {
 				onlinePlayers = resp.Online
 			}
 
 			ts = time.Now()
-			respCh <- ServerPingResponse{
+			respCh <- &ServerPingResponse{
 				info.Name, info.IP, resolvedAddress, ts, onlinePlayers,
 			}
 		}(resolved, normalized, info)
@@ -201,11 +214,13 @@ func mainLoop(pool *pgxpool.Pool) {
 		close(respCh)
 	}()
 
+	successful := 0
 	var responses [][]interface{}
 	for resp := range respCh {
 		var onlineValue *int = nil
 		if resp.Online > -1 {
 			onlineValue = &resp.Online
+			successful += 1
 		}
 		responses = append(responses, []interface{}{
 			resp.Name, resp.IP, resp.ResolvedIP, resp.Timestamp, onlineValue,
@@ -221,4 +236,6 @@ func mainLoop(pool *pgxpool.Pool) {
 	if err != nil {
 		panic(err)
 	}
+
+	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", len(servers), len(responses), successful, len(servers)-successful)
 }
