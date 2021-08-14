@@ -81,35 +81,13 @@ func resolveAddress(addr string, ctx context.Context) (string, error) {
 	return finalAddr, nil
 }
 
-func pingCtx(ctx context.Context, address string) (*mcping.PingResponse, error) {
-	ch := make(chan interface{}, 1)
-	go func() {
-		res, err := mcping.PingWithTimeout(address, 30*time.Second)
-		if err != nil {
-			ch <- err
-		} else {
-			ch <- &res
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-ch:
-		if err, ok := res.(error); ok {
-			return nil, err
-		}
-		return res.(*mcping.PingResponse), nil
-	}
-}
-
-func retryPingCtx(ctx context.Context, address string) (*mcping.PingResponse, error) {
+func retryPingCtx(ctx context.Context, address string) (resp mcping.PingResponse, err error) {
 	n := 1
 	for {
-		resp, err := pingCtx(ctx, address)
+		resp, err = mcping.DoPing(ctx, address, mcping.WithServerAddress(address))
 		if err != nil {
 			if err == context.DeadlineExceeded {
-				return nil, err
+				return
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
 				log.Printf("%s ping attempt %d", address, n)
@@ -118,10 +96,10 @@ func retryPingCtx(ctx context.Context, address string) (*mcping.PingResponse, er
 				continue
 			}
 
-			return nil, err
+			return
 		}
 
-		return resp, nil
+		return
 	}
 }
 
