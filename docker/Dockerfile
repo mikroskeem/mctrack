@@ -1,6 +1,9 @@
 FROM golang:alpine AS builder
 
 WORKDIR $GOPATH/src/github.com/mikroskeem/mctrack
+COPY go.mod go.sum .
+RUN go mod download
+
 COPY . .
 RUN env CGO_ENABLED=0 GOOS=linux go build -a -installsuffix nocgo \
         -ldflags "-s -w" \
