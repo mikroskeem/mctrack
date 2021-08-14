@@ -28,7 +28,7 @@ type ServerPingResponse struct {
 	Online     int
 }
 
-func resolveAddress(addr string, ctx context.Context) (string, error) {
+func resolveAddress(addr string, ctx context.Context) (resolved string, normalized string, err error) {
 	var resolvedHost string = addr
 	var resolvedPort int = 25565
 
@@ -37,10 +37,13 @@ func resolveAddress(addr string, ctx context.Context) (string, error) {
 		resolvedHost = host
 		parsedPort, err := strconv.Atoi(port)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		resolvedPort = parsedPort
 	}
+
+	// Build normalized address here before values get overwritten by next DNS queries
+	normalized = net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
 
 	// Try to resolve SRV
 	if _, addrs, err := net.DefaultResolver.LookupSRV(ctx, "minecraft", "tcp", resolvedHost); err == nil {
@@ -55,7 +58,7 @@ func resolveAddress(addr string, ctx context.Context) (string, error) {
 			}
 		}
 	} else if rerr, ok := err.(*net.DNSError); ok && !rerr.IsNotFound {
-		return "", err
+		return "", "", err
 	}
 
 	if finalHosts, err := net.DefaultResolver.LookupHost(ctx, resolvedHost); err == nil {
@@ -74,17 +77,17 @@ func resolveAddress(addr string, ctx context.Context) (string, error) {
 			// TODO: handle earlier!
 		}
 	} else if rerr, ok := err.(*net.DNSError); ok && !rerr.IsNotFound {
-		return "", err
+		return "", "", err
 	}
 
-	finalAddr := net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
-	return finalAddr, nil
+	resolved = net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
+	return resolved, normalized, nil
 }
 
-func retryPingCtx(ctx context.Context, address string) (resp mcping.PingResponse, err error) {
+func retryPingCtx(ctx context.Context, address string, realAddress string) (resp mcping.PingResponse, err error) {
 	n := 1
 	for {
-		resp, err = mcping.DoPing(ctx, address, mcping.WithServerAddress(address))
+		resp, err = mcping.DoPing(ctx, address, mcping.WithServerAddress(realAddress))
 		if err != nil {
 			if err == context.DeadlineExceeded {
 				return
@@ -155,7 +158,7 @@ func mainLoop(pool *pgxpool.Pool) {
 	for _, info := range servers {
 		resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resolved, err := resolveAddress(info.IP, resolveCtx)
+		resolved, normalized, err := resolveAddress(info.IP, resolveCtx)
 		if err == context.DeadlineExceeded {
 			log.Printf("failed to resolve IP for %s: %s", info.Name, err)
 			continue
@@ -168,7 +171,7 @@ func mainLoop(pool *pgxpool.Pool) {
 
 		wg.Add(1)
 
-		go func(address string, info ServerInfo) {
+		go func(resolvedAddress string, realAddress string, info ServerInfo) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			defer wg.Done()
@@ -176,7 +179,7 @@ func mainLoop(pool *pgxpool.Pool) {
 			var ts time.Time
 			var onlinePlayers int = -1
 
-			resp, err := retryPingCtx(ctx, address)
+			resp, err := retryPingCtx(ctx, resolvedAddress, realAddress)
 			if nerr, ok := err.(net.Error); ok {
 				log.Printf("%s did not respond: %s", info.Name, nerr)
 			} else if err != nil && err != context.DeadlineExceeded {
@@ -188,9 +191,9 @@ func mainLoop(pool *pgxpool.Pool) {
 
 			ts = time.Now()
 			respCh <- ServerPingResponse{
-				info.Name, info.IP, address, ts, onlinePlayers,
+				info.Name, info.IP, resolvedAddress, ts, onlinePlayers,
 			}
-		}(resolved, info)
+		}(resolved, normalized, info)
 	}
 
 	go func() {
