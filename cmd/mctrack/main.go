@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
+	doh "github.com/mikroskeem/go-doh-client"
 	"github.com/mikroskeem/mcping"
 )
 
@@ -29,6 +30,13 @@ type ServerPingResponse struct {
 	Timestamp  time.Time
 	Online     int
 }
+
+var (
+	dnsClient = doh.Resolver{
+		Host:  "1.1.1.1",
+		Class: doh.IN,
+	}
+)
 
 func resolveAddress(addr string, ctx context.Context) (resolved string, normalized string, err error) {
 	var resolvedHost string = addr
@@ -48,7 +56,7 @@ func resolveAddress(addr string, ctx context.Context) (resolved string, normaliz
 	normalized = net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
 
 	// Try to resolve SRV
-	if _, addrs, err := net.DefaultResolver.LookupSRV(ctx, "minecraft", "tcp", resolvedHost); err == nil {
+	if addrs, _, err := dnsClient.LookupServiceContext(ctx, "minecraft", "tcp", resolvedHost); err == nil {
 		if len(addrs) > 0 {
 			firstAddr := addrs[0]
 			resolvedHost = firstAddr.Target
@@ -63,26 +71,25 @@ func resolveAddress(addr string, ctx context.Context) (resolved string, normaliz
 		return "", "", err
 	}
 
-	if finalHosts, err := net.DefaultResolver.LookupHost(ctx, resolvedHost); err == nil {
+	if finalHosts, _, err := dnsClient.LookupAContext(ctx, resolvedHost); err == nil {
 		if len(finalHosts) > 0 {
 			for _, ip := range finalHosts {
-				parsed := net.ParseIP(ip)
+				parsed := net.ParseIP(ip.IP4)
 
-				// Skip nil and IPv6 addresses
-				if parsed == nil || parsed.To4() == nil {
+				// Skip nil addresses
+				if parsed == nil {
 					continue
 				}
 
-				resolvedHost = ip
+				resolvedHost = parsed.String()
 			}
 		} else {
 			// TODO: handle earlier!
 			log.Printf("no meaningful dns records for %s found", resolvedHost)
+			return "", "", doh.ErrNameError
 		}
-	} else if rerr, ok := err.(*net.DNSError); ok && !rerr.IsNotFound {
-		return "", "", rerr
-	} else if rerr.IsNotFound {
-		return "", "", rerr
+	} else {
+		return "", "", err
 	}
 
 	resolved = net.JoinHostPort(resolvedHost, strconv.Itoa(resolvedPort))
