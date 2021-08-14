@@ -18,12 +18,14 @@ import (
 )
 
 type ServerInfo struct {
+	ID          uint
 	Name        string
 	CurrentIcon *string
 	IP          string
 }
 
 type ServerPingResponse struct {
+	ID         uint
 	Name       string
 	IP         string
 	ResolvedIP string
@@ -148,19 +150,20 @@ func main() {
 func mainLoop(pool *pgxpool.Pool) {
 	// Query configured servers
 	var servers []ServerInfo
-	rows, err := pool.Query(context.Background(), "select name, ip from mctrack_watched_servers;")
+	rows, err := pool.Query(context.Background(), "SELECT id, name, ip FROM mctrack_watched_servers WHERE last_successful_ping IS NULL OR (now() - last_successful_ping) <= interval '30 days';")
 	if err != nil {
 		panic(err)
 	}
 
 	for rows.Next() {
+		var serverID uint
 		var serverName string
 		var serverIP string
-		if err := rows.Scan(&serverName, &serverIP); err != nil {
+		if err := rows.Scan(&serverID, &serverName, &serverIP); err != nil {
 			panic(err)
 		}
 
-		servers = append(servers, ServerInfo{serverName, nil, serverIP})
+		servers = append(servers, ServerInfo{serverID, serverName, nil, serverIP})
 	}
 
 	if err := rows.Err(); err != nil {
@@ -211,7 +214,7 @@ func mainLoop(pool *pgxpool.Pool) {
 
 			ts = time.Now()
 			respCh <- &ServerPingResponse{
-				info.Name, info.IP, resolvedAddress, ts, onlinePlayers,
+				info.ID, info.Name, info.IP, resolvedAddress, ts, onlinePlayers,
 			}
 		}(resolved, normalized, info)
 	}
@@ -221,28 +224,47 @@ func mainLoop(pool *pgxpool.Pool) {
 		close(respCh)
 	}()
 
-	successful := 0
 	var responses [][]interface{}
+	responseTsByID := map[uint]time.Time{}
 	for resp := range respCh {
 		var onlineValue *int = nil
 		if resp.Online > -1 {
 			onlineValue = &resp.Online
-			successful += 1
+			responseTsByID[resp.ID] = resp.Timestamp
 		}
 		responses = append(responses, []interface{}{
 			resp.Name, resp.IP, resp.ResolvedIP, resp.Timestamp, onlineValue,
 		})
 	}
 
-	_, err = pool.CopyFrom(
-		context.Background(),
-		pgx.Identifier{"mctrack_servers"},
-		[]string{"name", "ip", "resolved_ip", "timestamp", "online"},
-		pgx.CopyFromRows(responses),
-	)
+	ctx := context.Background()
+	err = pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		_, err := tx.CopyFrom(
+			ctx,
+			pgx.Identifier{"mctrack_servers"},
+			[]string{"name", "ip", "resolved_ip", "timestamp", "online"},
+			pgx.CopyFromRows(responses),
+		)
+		if err != nil {
+			return err
+		}
+
+		// Update last ping status for all servers
+		for id, ts := range responseTsByID {
+			_, err := tx.Exec(ctx, "UPDATE mctrack_watched_servers SET last_successful_ping = $1 WHERE id = $2", ts, id)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", len(servers), len(responses), successful, len(servers)-successful)
+	successful := len(responseTsByID)
+	totalServers := len(servers)
+
+	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", totalServers, len(responses), successful, totalServers-successful)
 }

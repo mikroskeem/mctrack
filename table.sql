@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS mctrack_watched_servers (
 	id SERIAL NOT NULL,
 	name VARCHAR(128) NOT NULL,
 	ip VARCHAR(261) NOT NULL,
+	last_successful_ping TIMESTAMPTZ,
 	PRIMARY KEY (id),
 	UNIQUE (name)
 );
