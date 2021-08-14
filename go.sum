@@ -88,6 +88,8 @@ github.com/mikroskeem/go-doh-client v0.0.0-20210814203701-5ccfcaa1e728 h1:ZtaMGC
 github.com/mikroskeem/go-doh-client v0.0.0-20210814203701-5ccfcaa1e728/go.mod h1:oReQWJUgOQA4Y3fwvwZJUJI4glTYY2SM3BiLhWtqido=
 github.com/mikroskeem/mcping v0.0.0-20210814160259-beedb6ab0f67 h1:D7UtTmuhPV7Fq5hHml6eSMwyeyo+i1B1bdrb2mRWp3M=
 github.com/mikroskeem/mcping v0.0.0-20210814160259-beedb6ab0f67/go.mod h1:NLmDsHTQw71IHgXM4U/ykkxVd+zY1aoDGtWkzUiFacE=
+github.com/mikroskeem/mcping v0.0.0-20210814221042-9d0f45a05b67 h1:AnwwOBvPRDpdNxD12RP+D0R2BQUX97BfkV7/lRrM52Q=
+github.com/mikroskeem/mcping v0.0.0-20210814221042-9d0f45a05b67/go.mod h1:yG14CaiOXOcyqPMSfNz7foObdnUZ3gTHJ0vTl/eO9RU=
 github.com/pkg/errors v0.8.1 h1:iURUrRGxPUNPdy5/HRSm+Yj6okJ6UtLINN0Q9M4+h3I=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
