@@ -10,6 +10,7 @@ services:
       - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_PASSWORD: "longpassword"
+      POSTGRES_DB: "mctrack"
   postgrest:
     image: postgrest/postgrest
     ports:
