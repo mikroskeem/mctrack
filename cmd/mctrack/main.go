@@ -176,13 +176,10 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	var wg sync.WaitGroup
 	respCh := make(chan *ServerPingResponse, len(servers))
 
-	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer resolveCancel()
-
 	log.Printf("pinging %d servers", len(servers))
 	for _, info := range servers {
 		wg.Add(1)
-		go queryServer(info, resolveCtx, &wg, respCh)
+		go queryServer(ctx, info, &wg, respCh)
 	}
 
 	go func() {
@@ -234,11 +231,13 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", totalServers, len(responses), successful, totalServers-successful)
 }
 
-func queryServer(info ServerInfo, resolveCtx context.Context, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
+func queryServer(ctx context.Context, info ServerInfo, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	defer wg.Done()
 
 	// Try to resolve the real IP, and normalize the input
-	resolvedAddr, normalizedAddr, err := resolveAddress(info.IP, resolveCtx)
+	resolvedAddr, normalizedAddr, err := resolveAddress(info.IP, ctx)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		log.Printf("server '%s' did not respond (dns/timeout): %s", info.Name, err)
 		return
@@ -251,9 +250,6 @@ func queryServer(info ServerInfo, resolveCtx context.Context, wg *sync.WaitGroup
 	}
 
 	// Now ping the server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	var onlinePlayers int = -1
 	resp, err := retryPingCtx(ctx, info.Name, resolvedAddr, normalizedAddr)
 	if nerr, ok := err.(net.Error); ok {
