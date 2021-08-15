@@ -134,23 +134,24 @@ func main() {
 		panic(err)
 	}
 
-	pool, err := pgxpool.ConnectConfig(context.Background(), poolConfig)
+	ctx := context.Background()
+	pool, err := pgxpool.ConnectConfig(ctx, poolConfig)
 	if err != nil {
 		panic(err)
 	}
 
 	for {
 		log.Println("pinging")
-		mainLoop(pool)
+		mainLoop(ctx, pool)
 		log.Println("sleeping")
 		<-time.After(10 * time.Second)
 	}
 }
 
-func mainLoop(pool *pgxpool.Pool) {
+func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	// Query configured servers
 	var servers []ServerInfo
-	rows, err := pool.Query(context.Background(), "SELECT id, name, ip FROM mctrack_watched_servers WHERE last_successful_ping IS NULL OR (now() - last_successful_ping) <= interval '30 days';")
+	rows, err := pool.Query(ctx, "SELECT id, name, ip FROM mctrack_watched_servers WHERE last_successful_ping IS NULL OR (now() - last_successful_ping) <= interval '30 days';")
 	if err != nil {
 		panic(err)
 	}
@@ -237,7 +238,6 @@ func mainLoop(pool *pgxpool.Pool) {
 		})
 	}
 
-	ctx := context.Background()
 	err = pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		_, err := tx.CopyFrom(
 			ctx,
