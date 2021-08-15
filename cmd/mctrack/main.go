@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 	doh "github.com/mikroskeem/go-doh-client"
 	"github.com/mikroskeem/mcping/v2"
+	"go.uber.org/zap"
 )
 
 type ServerInfo struct {
@@ -37,6 +38,7 @@ var (
 		Host:  "1.1.1.1",
 		Class: doh.IN,
 	}
+	debugMode bool
 )
 
 func resolveAddress(addr string, ctx context.Context) (resolved string, normalized string, err error) {
@@ -86,7 +88,7 @@ func resolveAddress(addr string, ctx context.Context) (resolved string, normaliz
 			}
 		} else {
 			// TODO: handle earlier!
-			log.Printf("no meaningful dns records for %s found", resolvedHost)
+			zap.L().Debug("no meaningful dns records", zap.String("host", resolvedHost))
 			return "", "", doh.ErrNameError
 		}
 	} else {
@@ -122,33 +124,46 @@ func retryPingCtx(ctx context.Context, name string, address string, realAddress 
 }
 
 func main() {
+	flag.BoolVar(&debugMode, "debug", false, "Whether to enable debug logging")
+	flag.Parse()
+
+	// Configure logging
+	var logger *zap.Logger
+	var err error
+	if debugMode {
+		logger, err = zap.NewDevelopment()
+	} else {
+		logger, err = zap.NewProduction()
+	}
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = logger.Sync() }()
+
+	zap.ReplaceGlobals(logger)
+
 	connString := os.Getenv("MCTRACK_DATABASE_URL")
 	if connString == "" {
-		panic("MCTRACK_DATABASE_URL is not set")
+		zap.L().Fatal("MCTRACK_DATABASE_URL is not set")
 	}
 
 	poolConfig, err := pgxpool.ParseConfig(connString)
 	if err != nil {
-		panic(err)
+		zap.L().Fatal("failed to parse database url", zap.Error(err))
 	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.ConnectConfig(ctx, poolConfig)
 	if err != nil {
-		panic(err)
+		zap.L().Fatal("failed to connect to the database", zap.Error(err))
 	}
 
 	period := 10 * time.Second
 	timer := time.NewTimer(period)
 	for {
 		pingCtx, cancel := context.WithCancel(ctx)
-		log.Println("begin")
-		go func() {
-			start := time.Now()
-			mainLoop(pingCtx, pool)
-			end := time.Since(start)
-			log.Printf("end (%s)", end)
-		}()
+		zap.L().Debug("begin")
+		go mainLoop(pingCtx, pool)
 
 		<-timer.C
 		timer.Reset(period)
@@ -157,11 +172,13 @@ func main() {
 }
 
 func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
+	start := time.Now()
+
 	// Query configured servers
 	var servers []ServerInfo
 	rows, err := pool.Query(ctx, "SELECT id, name, ip FROM mctrack_watched_servers WHERE last_successful_ping IS NULL OR (now() - last_successful_ping) <= interval '30 days';")
 	if err != nil {
-		panic(err)
+		zap.L().Panic("failed to query servers", zap.Error(err))
 	}
 
 	for rows.Next() {
@@ -174,7 +191,7 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	}
 
 	if err := rows.Err(); err != nil {
-		panic(err)
+		zap.L().Panic("failed to query servers", zap.Error(err))
 	}
 
 	rows.Close()
@@ -182,7 +199,7 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	var wg sync.WaitGroup
 	respCh := make(chan *ServerPingResponse, len(servers))
 
-	log.Printf("pinging %d servers", len(servers))
+	zap.L().Debug("pinging servers", zap.Int("count", len(servers)))
 	for _, info := range servers {
 		wg.Add(1)
 		go queryServer(ctx, info, &wg, respCh)
@@ -234,12 +251,13 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 		panic(err)
 	}
 	insertEnd := time.Since(insertStart)
+	end := time.Since(start)
 
 	successful := len(responseTsByID)
 	insertedRows := len(responses)
 	totalServers := len(servers)
 
-	log.Printf("total %d; resolved=%d, successful=%d (%d diff; insert took %s)", totalServers, insertedRows, successful, totalServers-successful, insertEnd)
+	zap.L().Info("ping cycle done", zap.Int("total", totalServers), zap.Int("resolved", insertedRows), zap.Int("successful", successful), zap.Int("diff", totalServers-successful), zap.Duration("insert_duration", insertEnd), zap.Duration("duration", end))
 }
 
 func queryServer(ctx context.Context, info ServerInfo, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
@@ -249,26 +267,29 @@ func queryServer(ctx context.Context, info ServerInfo, wg *sync.WaitGroup, respC
 
 	// Try to resolve the real IP, and normalize the input
 	resolvedAddr, normalizedAddr, err := resolveAddress(info.IP, ctx)
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		log.Printf("server '%s' did not respond (dns/timeout): %s", info.Name, err)
-		return
-	} else if derr, ok := err.(*net.DNSError); ok {
-		log.Printf("server '%s' did not respond (dns/error): %s", info.Name, derr)
-		return
-	} else if err != nil {
-		log.Printf("server '%s' did not respond (dns/unk): %s", info.Name, derr)
+	if err != nil {
+		errType := "dns/unk"
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			errType = "dns/error"
+		} else if _, ok := err.(*net.DNSError); ok {
+			errType = "dns/error"
+		}
+
+		zap.L().Debug("server failed to respond", zap.String("name", info.Name), zap.String("type", errType), zap.Error(err))
 		return
 	}
 
 	// Now ping the server
 	var onlinePlayers int = -1
 	resp, n, err := retryPingCtx(ctx, info.Name, resolvedAddr, normalizedAddr)
-	if nerr, ok := err.(net.Error); ok {
-		log.Printf("server '%s' did not respond (net; att=%d): %s", info.Name, n, nerr)
-	} else if errors.Is(err, io.EOF) {
-		log.Printf("server '%s' did not respond (io; att=%d): %s", info.Name, n, err)
-	} else if err != nil {
-		log.Printf("server '%s' did not respond (unk; att=%d): %s", info.Name, n, err)
+	if err != nil {
+		errType := "unk"
+		if _, ok := err.(net.Error); ok {
+			errType = "net"
+		} else if errors.Is(err, io.EOF) {
+			errType = "io"
+		}
+		zap.L().Debug("server failed to respond", zap.String("name", info.Name), zap.String("type", errType), zap.Uint("attempts", n), zap.Error(err))
 	} else {
 		onlinePlayers = resp.Players.Online
 	}
