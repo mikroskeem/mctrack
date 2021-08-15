@@ -143,16 +143,18 @@ func main() {
 	period := 10 * time.Second
 	timer := time.NewTimer(period)
 	for {
+		pingCtx, cancel := context.WithCancel(ctx)
 		log.Println("begin")
 		go func() {
 			start := time.Now()
-			mainLoop(ctx, pool)
+			mainLoop(pingCtx, pool)
 			end := time.Since(start)
 			log.Printf("end (%s)", end)
 		}()
 
 		<-timer.C
 		timer.Reset(period)
+		cancel()
 	}
 }
 
@@ -208,6 +210,8 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 		})
 	}
 
+	// NOTE: do not use parent context here! We want this data to be inserted at all times
+	ctx = context.Background()
 	err = pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		_, err := tx.CopyFrom(
 			ctx,
