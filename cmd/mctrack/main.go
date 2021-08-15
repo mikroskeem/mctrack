@@ -140,11 +140,19 @@ func main() {
 		panic(err)
 	}
 
+	period := 10 * time.Second
+	timer := time.NewTimer(period)
 	for {
-		log.Println("pinging")
-		mainLoop(ctx, pool)
-		log.Println("sleeping")
-		<-time.After(10 * time.Second)
+		log.Println("begin")
+		go func() {
+			start := time.Now()
+			mainLoop(ctx, pool)
+			end := time.Since(start)
+			log.Printf("end (%s)", end)
+		}()
+
+		<-timer.C
+		timer.Reset(period)
 	}
 }
 
