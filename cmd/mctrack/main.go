@@ -18,10 +18,9 @@ import (
 )
 
 type ServerInfo struct {
-	ID          uint
-	Name        string
-	CurrentIcon *string
-	IP          string
+	ID   uint
+	Name string
+	IP   string
 }
 
 type ServerPingResponse struct {
@@ -167,14 +166,12 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	}
 
 	for rows.Next() {
-		var serverID uint
-		var serverName string
-		var serverIP string
-		if err := rows.Scan(&serverID, &serverName, &serverIP); err != nil {
+		server := ServerInfo{}
+		if err := rows.Scan(&server.ID, &server.Name, &server.IP); err != nil {
 			panic(err)
 		}
 
-		servers = append(servers, ServerInfo{serverID, serverName, nil, serverIP})
+		servers = append(servers, server)
 	}
 
 	if err := rows.Err(); err != nil {
