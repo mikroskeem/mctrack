@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	doh "github.com/mikroskeem/go-doh-client"
-	"github.com/mikroskeem/mcping"
+	"github.com/mikroskeem/mcping/v2"
 )
 
 type ServerInfo struct {
@@ -104,14 +104,14 @@ func retryPingCtx(ctx context.Context, name string, address string, realAddress 
 		if err = ctx.Err(); err != nil {
 			return
 		}
-		resp, err = mcping.DoPing(ctx, address, mcping.WithServerAddress(realAddress))
+		resp, err = mcping.Ping(ctx, address, mcping.WithServerAddress(realAddress), mcping.WithReadWriteTimeout(900, 900))
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				return
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
 				log.Printf("server '%s' (%s) ping attempt %d", name, address, n)
-				<-time.After(1500 * time.Millisecond)
+				<-time.After(500 * time.Duration(n) * time.Millisecond)
 				n += 1
 				continue
 			}
@@ -209,7 +209,7 @@ func mainLoop(pool *pgxpool.Pool) {
 			} else if err != nil {
 				log.Printf("server '%s' did not respond (unk): %s", info.Name, err)
 			} else {
-				onlinePlayers = resp.Online
+				onlinePlayers = resp.Players.Online
 			}
 
 			ts = time.Now()
