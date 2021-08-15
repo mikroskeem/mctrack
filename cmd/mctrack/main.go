@@ -207,6 +207,7 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	}
 
 	// NOTE: do not use parent context here! We want this data to be inserted at all times
+	insertStart := time.Now()
 	ctx = context.Background()
 	err = pool.BeginTxFunc(ctx, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		_, err := tx.CopyFrom(
@@ -232,11 +233,13 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	if err != nil {
 		panic(err)
 	}
+	insertEnd := time.Since(insertStart)
 
 	successful := len(responseTsByID)
+	insertedRows := len(responses)
 	totalServers := len(servers)
 
-	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", totalServers, len(responses), successful, totalServers-successful)
+	log.Printf("total %d; resolved=%d, successful=%d (%d diff; insert took %s)", totalServers, insertedRows, successful, totalServers-successful, insertEnd)
 }
 
 func queryServer(ctx context.Context, info ServerInfo, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
