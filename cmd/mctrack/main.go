@@ -181,7 +181,8 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 
 	log.Printf("pinging %d servers", len(servers))
 	for _, info := range servers {
-		go queryServer(&info, resolveCtx, &wg, respCh)
+		wg.Add(1)
+		go queryServer(info, resolveCtx, &wg, respCh)
 	}
 
 	go func() {
@@ -233,7 +234,9 @@ func mainLoop(ctx context.Context, pool *pgxpool.Pool) {
 	log.Printf("total %d; resolved=%d, successful=%d (%d diff)", totalServers, len(responses), successful, totalServers-successful)
 }
 
-func queryServer(info *ServerInfo, resolveCtx context.Context, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
+func queryServer(info ServerInfo, resolveCtx context.Context, wg *sync.WaitGroup, respCh chan<- *ServerPingResponse) {
+	defer wg.Done()
+
 	// Try to resolve the real IP, and normalize the input
 	resolvedAddr, normalizedAddr, err := resolveAddress(info.IP, resolveCtx)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -247,13 +250,9 @@ func queryServer(info *ServerInfo, resolveCtx context.Context, wg *sync.WaitGrou
 		return
 	}
 
-	// Add itself to the wait group
-	wg.Add(1)
-
 	// Now ping the server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	defer wg.Done()
 
 	var onlinePlayers int = -1
 	resp, err := retryPingCtx(ctx, info.Name, resolvedAddr, normalizedAddr)
