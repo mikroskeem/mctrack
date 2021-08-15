@@ -97,8 +97,8 @@ func resolveAddress(addr string, ctx context.Context) (resolved string, normaliz
 	return resolved, normalized, nil
 }
 
-func retryPingCtx(ctx context.Context, name string, address string, realAddress string) (resp mcping.PingResponse, err error) {
-	n := 1
+func retryPingCtx(ctx context.Context, name string, address string, realAddress string) (resp mcping.PingResponse, n uint, err error) {
+	n = 1
 	for {
 		if err = ctx.Err(); err != nil {
 			return
@@ -109,7 +109,6 @@ func retryPingCtx(ctx context.Context, name string, address string, realAddress 
 				return
 			} else if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Retry
-				log.Printf("server '%s' (%s) ping attempt %d", name, address, n)
 				<-time.After(500 * time.Duration(n) * time.Millisecond)
 				n += 1
 				continue
@@ -260,13 +259,13 @@ func queryServer(ctx context.Context, info ServerInfo, wg *sync.WaitGroup, respC
 
 	// Now ping the server
 	var onlinePlayers int = -1
-	resp, err := retryPingCtx(ctx, info.Name, resolvedAddr, normalizedAddr)
+	resp, n, err := retryPingCtx(ctx, info.Name, resolvedAddr, normalizedAddr)
 	if nerr, ok := err.(net.Error); ok {
-		log.Printf("server '%s' did not respond (net): %s", info.Name, nerr)
+		log.Printf("server '%s' did not respond (net; att=%d): %s", info.Name, n, nerr)
 	} else if errors.Is(err, io.EOF) {
-		log.Printf("server '%s' did not respond (io): %s", info.Name, err)
+		log.Printf("server '%s' did not respond (io; att=%d): %s", info.Name, n, err)
 	} else if err != nil {
-		log.Printf("server '%s' did not respond (unk): %s", info.Name, err)
+		log.Printf("server '%s' did not respond (unk; att=%d): %s", info.Name, n, err)
 	} else {
 		onlinePlayers = resp.Players.Online
 	}
