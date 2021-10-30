@@ -1,0 +1,1 @@
+SELECT compress_chunk(c) FROM show_chunks('mctrack_servers', now() - interval '1 day', now() - interval '2 weeks') c LEFT JOIN chunk_compression_stats('mctrack_servers') stats ON c::text = stats.chunk_name WHERE stats.compression_status = 'Uncompressed';
