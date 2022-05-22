@@ -11,20 +11,14 @@ services:
     environment:
       POSTGRES_PASSWORD: "longpassword"
       POSTGRES_DB: "mctrack"
-  postgrest:
-    image: postgrest/postgrest
-    ports:
-      - "127.0.0.1:5000:3000"
-    environment:
-      PGRST_DB_URI: "postgres://postgres:longpassword@database/mctrack"
-      PGRST_DB_ANON_ROLE: "postgres"
   grafana:
     image: grafana/grafana
     volumes:
       - "grafana:/var/lib/grafana"
     ports:
       - "127.0.0.1:8096:3000"
-    environment: {}
+    env_file:
+      - ./grafana/grafana.env
 
 volumes:
   database:
