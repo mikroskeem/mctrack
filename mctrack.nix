@@ -8,7 +8,7 @@ buildGo118Module {
   version = rev;
 
   src = lib.cleanSource ./.;
-  vendorSha256 = "sha256-bMmlnp0iDPe2QEZgU8xQ21P6z6PqpYIaK73gjuvHa7E=";
+  vendorSha256 = null;
 
   ldflags = [ "-s" "-w" ];
   subPackages = [ "cmd/mctrack" ];
